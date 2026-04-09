@@ -6,3 +6,4 @@ eks_nodes.json
 eks_clusters.json
 k8s_resources.txt
 *.bak
+android/app/release/
