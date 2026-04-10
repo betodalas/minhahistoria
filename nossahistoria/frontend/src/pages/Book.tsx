@@ -67,12 +67,11 @@ export default function Book() {
 
   const myLetter = (key: string) => letters[key]?.text
 
-  // Filtra momentos de um período (fromDate = null significa "desde o início")
-  const momentsByYear = (fromDate: Date | null, toDate: Date) =>
+  // Filtra momentos de um determinado ano
+  const momentsByYear = (fromDate: Date, toDate: Date) =>
     moments.filter((m: any) => {
       const d = new Date(m.moment_date).getTime()
-      const afterStart = fromDate ? d >= fromDate.getTime() : true
-      return afterStart && d < toDate.getTime()
+      return d >= fromDate.getTime() && d < toDate.getTime()
     })
 
   // Gera todas as datas
@@ -155,6 +154,7 @@ export default function Book() {
   // Separa casamento + anos free + anos premium
   const freeItems = dates.filter(d => !d.premium)
   const premiumItems = dates.filter(d => d.premium)
+  const weddingPassed = wedding ? daysUntil(wedding) <= 0 : false
 
   return (
     <Layout>
@@ -246,14 +246,14 @@ export default function Book() {
             })()}
 
             {/* Momentos do período */}
-            {/* Casamento: momentos ANTES do casamento | Aniversários: momentos do ano */}
             {(() => {
-              const periodMoments = momentsByYear(openCapsule.prevDate, openCapsule.date)
-              const periodLabel = openCapsule.key === 'wedding' ? 'antes do casamento' : 'deste ano'
+              const periodMoments = openCapsule.prevDate
+                ? momentsByYear(openCapsule.prevDate, openCapsule.date)
+                : moments
               return periodMoments.length > 0 ? (
                 <>
                   <p className="text-xs font-bold text-violet-700 tracking-widest uppercase mb-3">
-                    📖 Momentos {periodLabel}
+                    📖 Momentos {openCapsule.prevDate ? 'deste ano' : 'de vocês'}
                   </p>
                   {periodMoments.map((m: any, i: number) => (
                     <div key={i} className="mb-3 pb-3 border-b border-gray-200">
@@ -295,6 +295,43 @@ export default function Book() {
             </div>
           ))}
         </div>
+
+        {/* Cartas do dia do casamento */}
+        {weddingPassed && (
+          <>
+            <p className="section-label">Cartas do dia do casamento 💌</p>
+            <div className="rounded-2xl mb-4 overflow-hidden" style={{ background: '#F0E6EF', border: '1px solid #D8B4C8' }}>
+              {myLetter('wedding') ? (
+                <div className="p-4 mb-2" style={{ background: 'rgba(124,58,237,0.1)', borderBottom: '1px solid rgba(124,58,237,0.15)' }}>
+                  <p className="text-xs font-bold mb-2" style={{ color: '#7c3aed' }}>💌 Sua carta para o dia do casamento</p>
+                  <p className="text-sm leading-relaxed" style={{ color: '#3D1A2A' }}>{myLetter('wedding')}</p>
+                </div>
+              ) : (
+                <div className="p-4 text-center" style={{ borderBottom: '1px solid rgba(0,0,0,0.06)' }}>
+                  <p className="text-xs" style={{ color: '#9B6B7A' }}>Você não escreveu uma carta para este dia</p>
+                </div>
+              )}
+              {(() => {
+                const partnerLetter = letters['partner_wedding']?.text
+                return partnerLetter ? (
+                  <div className="p-4">
+                    <p className="text-xs font-bold mb-2" style={{ color: '#be185d' }}>💌 Carta de {couple?.partner_name || 'parceiro(a)'}</p>
+                    <p className="text-sm leading-relaxed"
+                      style={{ color: '#3D1A2A', filter: 'blur(5px)', cursor: 'pointer', transition: 'filter 0.4s' }}
+                      onClick={e => (e.currentTarget.style.filter = 'none')}>
+                      {partnerLetter}
+                    </p>
+                    <p className="text-xs text-center mt-2" style={{ color: '#9B6B7A' }}>toque para revelar</p>
+                  </div>
+                ) : (
+                  <div className="p-4 text-center">
+                    <p className="text-xs" style={{ color: '#9B6B7A' }}>💌 {couple?.partner_name || 'Parceiro(a)'} ainda não escreveu a carta</p>
+                  </div>
+                )
+              })()}
+            </div>
+          </>
+        )}
 
         {/* Cápsulas grátis */}
         <p className="section-label">Cápsulas do tempo</p>
