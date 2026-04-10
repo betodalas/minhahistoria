@@ -67,11 +67,12 @@ export default function Book() {
 
   const myLetter = (key: string) => letters[key]?.text
 
-  // Filtra momentos de um determinado ano
-  const momentsByYear = (fromDate: Date, toDate: Date) =>
+  // Filtra momentos de um período (fromDate = null significa "desde o início")
+  const momentsByYear = (fromDate: Date | null, toDate: Date) =>
     moments.filter((m: any) => {
       const d = new Date(m.moment_date).getTime()
-      return d >= fromDate.getTime() && d < toDate.getTime()
+      const afterStart = fromDate ? d >= fromDate.getTime() : true
+      return afterStart && d < toDate.getTime()
     })
 
   // Gera todas as datas
@@ -245,14 +246,14 @@ export default function Book() {
             })()}
 
             {/* Momentos do período */}
+            {/* Casamento: momentos ANTES do casamento | Aniversários: momentos do ano */}
             {(() => {
-              const periodMoments = openCapsule.prevDate
-                ? momentsByYear(openCapsule.prevDate, openCapsule.date)
-                : moments
+              const periodMoments = momentsByYear(openCapsule.prevDate, openCapsule.date)
+              const periodLabel = openCapsule.key === 'wedding' ? 'antes do casamento' : 'deste ano'
               return periodMoments.length > 0 ? (
                 <>
                   <p className="text-xs font-bold text-violet-700 tracking-widest uppercase mb-3">
-                    📖 Momentos {openCapsule.prevDate ? 'deste ano' : 'de vocês'}
+                    📖 Momentos {periodLabel}
                   </p>
                   {periodMoments.map((m: any, i: number) => (
                     <div key={i} className="mb-3 pb-3 border-b border-gray-200">
