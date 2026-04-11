@@ -139,6 +139,32 @@ const migrate = async () => {
         FOREIGN KEY (user2_id) REFERENCES users(id) ON DELETE SET NULL;
     `).catch(() => {})
 
+
+    await client.query(`
+      ALTER TABLE couples ADD COLUMN IF NOT EXISTS partner_name_manual VARCHAR(100);
+      ALTER TABLE moments ADD COLUMN IF NOT EXISTS music_link TEXT;
+      ALTER TABLE moments ADD COLUMN IF NOT EXISTS voice_url TEXT;
+      ALTER TABLE moments ADD COLUMN IF NOT EXISTS photo_size INTEGER DEFAULT 0;
+      ALTER TABLE moments ADD COLUMN IF NOT EXISTS audio_size INTEGER DEFAULT 0;
+    `).catch(() => {})
+
+    // ─── Índices de performance ───────────────────────────────────────────────
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS idx_couples_user1 ON couples(user1_id);
+      CREATE INDEX IF NOT EXISTS idx_couples_user2 ON couples(user2_id);
+      CREATE INDEX IF NOT EXISTS idx_couples_invite ON couples(invite_token);
+      CREATE INDEX IF NOT EXISTS idx_moments_couple ON moments(couple_id);
+      CREATE INDEX IF NOT EXISTS idx_moments_date ON moments(couple_id, moment_date);
+      CREATE INDEX IF NOT EXISTS idx_perspectives_moment ON perspectives(moment_id);
+      CREATE INDEX IF NOT EXISTS idx_question_answers_couple ON question_answers(couple_id);
+      CREATE INDEX IF NOT EXISTS idx_question_answers_user ON question_answers(user_id);
+      CREATE INDEX IF NOT EXISTS idx_letters_couple ON letters(couple_id);
+      CREATE INDEX IF NOT EXISTS idx_guest_posts_couple ON guest_posts(couple_id);
+      CREATE INDEX IF NOT EXISTS idx_unlock_dates_couple ON unlock_dates(couple_id);
+      CREATE INDEX IF NOT EXISTS idx_reset_tokens_token ON password_reset_tokens(token);
+      CREATE INDEX IF NOT EXISTS idx_reset_tokens_user ON password_reset_tokens(user_id);
+    `)
+
     await client.query('COMMIT')
     console.log('✅ Migrations executadas com sucesso!')
   } catch (err) {

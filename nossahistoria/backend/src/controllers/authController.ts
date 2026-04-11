@@ -29,7 +29,7 @@ export const register = async (req: Request, res: Response) => {
     )
     const user = result.rows[0]
 
-    const baseUrl = process.env.API_URL || 'https://nossahistoria-xtjq.onrender.com/api'
+    const baseUrl = process.env.API_URL || 'http://localhost:3001/api'
     const verifyLink = `${baseUrl}/auth/verify-email?token=${verifyToken}`
     sendVerificationEmail({ toEmail: email, name, verifyLink })
       .catch((err: any) => console.error('[VERIFY EMAIL] Falhou:', err?.message))
@@ -245,5 +245,177 @@ export const resetPassword = async (req: Request, res: Response) => {
   } catch (err) {
     console.error('[RESET PASSWORD]', err)
     res.status(500).json({ error: 'Erro ao redefinir senha. Tente novamente.' })
+  }
+}
+
+// ─── Funções extraídas das rotas inline ──────────────────────────────────────
+
+export const getMe = async (req: any, res: Response) => {
+  try {
+    const userResult = await pool.query(
+      'SELECT id, name, email, avatar_url FROM users WHERE id = $1',
+      [req.userId]
+    )
+    const coupleResult = await pool.query(
+      `SELECT c.*,
+        COALESCE(
+          CASE WHEN c.user1_id = $1 THEN u2.name ELSE u1.name END,
+          c.partner_name_manual
+        ) AS partner_name,
+        CASE WHEN c.user1_id = $1 THEN u2.email ELSE u1.email END AS partner_email
+       FROM couples c
+       LEFT JOIN users u1 ON u1.id = c.user1_id
+       LEFT JOIN users u2 ON u2.id = c.user2_id
+       WHERE c.user1_id = $1 OR c.user2_id = $1
+       LIMIT 1`,
+      [req.userId]
+    )
+    res.json({ user: userResult.rows[0], couple: coupleResult.rows[0] || null })
+  } catch (err) {
+    res.status(500).json({ error: 'Erro ao buscar dados do usuário' })
+  }
+}
+
+export const updateCouple = async (req: any, res: Response) => {
+  const { weddingDate, coupleName, partnerName } = req.body
+  const userId = req.userId
+  try {
+    let coupleResult = await pool.query(
+      'SELECT * FROM couples WHERE user1_id = $1 OR user2_id = $1',
+      [userId]
+    )
+    if (!coupleResult.rows[0]) {
+      const inviteToken = uuidv4()
+      coupleResult = await pool.query(
+        `INSERT INTO couples (user1_id, wedding_date, couple_name, invite_token)
+         VALUES ($1, $2, $3, $4) RETURNING *`,
+        [userId, weddingDate || null, coupleName || null, inviteToken]
+      )
+      return res.json(coupleResult.rows[0])
+    }
+    const couple = coupleResult.rows[0]
+    const updated = await pool.query(
+      `UPDATE couples SET
+        wedding_date = CASE WHEN $1::text IS NOT NULL THEN $1::date ELSE wedding_date END,
+        couple_name  = CASE WHEN $2::text IS NOT NULL THEN $2 ELSE couple_name END,
+        partner_name_manual = CASE WHEN $4::text IS NOT NULL THEN $4 ELSE partner_name_manual END
+       WHERE id = $3 RETURNING *`,
+      [weddingDate || null, coupleName || null, couple.id, partnerName || null]
+    )
+    if (partnerName) {
+      const partnerId = couple.user1_id === userId ? couple.user2_id : couple.user1_id
+      if (partnerId) {
+        await pool.query('UPDATE users SET name = $1 WHERE id = $2', [partnerName, partnerId])
+      }
+    }
+    res.json(updated.rows[0])
+  } catch (err) {
+    console.error(err)
+    res.status(500).json({ error: 'Erro ao atualizar casal' })
+  }
+}
+
+export const sendInvite = async (req: any, res: Response) => {
+  const { sendInviteEmail } = await import('../utils/email')
+  const { partnerEmail } = req.body
+  if (!partnerEmail) return res.status(400).json({ error: 'Email do parceiro obrigatório' })
+  try {
+    const userResult = await pool.query('SELECT name FROM users WHERE id = $1', [req.userId])
+    const fromName = userResult.rows[0]?.name || 'Seu amor'
+
+    let coupleResult = await pool.query(
+      'SELECT * FROM couples WHERE user1_id = $1 OR user2_id = $1 LIMIT 1',
+      [req.userId]
+    )
+    if (!coupleResult.rows[0]) {
+      const token = uuidv4()
+      coupleResult = await pool.query(
+        'INSERT INTO couples (user1_id, invite_token) VALUES ($1, $2) RETURNING *',
+        [req.userId, token]
+      )
+    }
+    const couple = coupleResult.rows[0]
+    const frontendUrl = process.env.FRONTEND_URL || 'https://nossahistoria.vercel.app'
+    const inviteLink = `${frontendUrl}/convite/${couple.invite_token}`
+
+    res.json({ success: true, inviteLink, emailSent: true })
+
+    sendInviteEmail({ toEmail: partnerEmail, fromName, coupleName: couple.couple_name || '', inviteLink })
+      .then(() => console.log(`[INVITE] Email enviado para ${partnerEmail}`))
+      .catch((err: any) => console.error('[INVITE] Email falhou:', err?.message))
+  } catch (err: any) {
+    console.error('Erro no convite:', err)
+    res.status(500).json({ error: 'Erro ao processar convite.' })
+  }
+}
+
+export const acceptInvite = async (req: any, res: Response) => {
+  const { token } = req.body
+  if (!token) return res.status(400).json({ error: 'Token obrigatório' })
+  try {
+    const coupleResult = await pool.query('SELECT * FROM couples WHERE invite_token = $1', [token])
+    if (!coupleResult.rows[0]) return res.status(404).json({ error: 'Convite inválido ou expirado' })
+    const couple = coupleResult.rows[0]
+    if (couple.user1_id === req.userId || couple.user2_id === req.userId) {
+      return res.status(400).json({ error: 'Você já faz parte deste casal' })
+    }
+    const updated = await pool.query(
+      'UPDATE couples SET user2_id = $1 WHERE id = $2 AND user2_id IS NULL RETURNING *',
+      [req.userId, couple.id]
+    )
+    if (!updated.rows[0]) return res.status(400).json({ error: 'Este convite já foi usado' })
+    res.json(updated.rows[0])
+  } catch (err) {
+    res.status(500).json({ error: 'Erro ao aceitar convite' })
+  }
+}
+
+export const verifyEmail = async (req: any, res: Response) => {
+  const { token } = req.query
+  if (!token) return res.status(400).send('Token inválido.')
+  try {
+    const result = await pool.query(
+      `UPDATE users SET email_verified = TRUE, email_verify_token = NULL
+       WHERE email_verify_token = $1 AND email_verified = FALSE
+       RETURNING name, email`,
+      [token]
+    )
+    const frontendUrl = process.env.FRONTEND_URL || 'https://nossahistoria.vercel.app'
+    if (!result.rows[0]) {
+      return res.send(`<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8"><title>Nossa História</title>
+        <style>body{background:#FFF0F3;color:#3D1A2A;font-family:sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;text-align:center;padding:24px}h1{color:#e53e3e}p{color:#9B6B7A;margin-top:8px}</style></head>
+        <body><div><div style="font-size:48px">⚠️</div><h1>Link inválido ou já utilizado</h1><p>Este link de confirmação não é mais válido.</p></div></body></html>`)
+    }
+    const { name } = result.rows[0]
+    res.send(`<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8"><title>Nossa História</title>
+      <style>body{background:#FFF0F3;color:#3D1A2A;font-family:sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;text-align:center;padding:24px}h1{color:#7C4D6B}p{color:#9B6B7A;margin-top:8px}.btn{display:inline-block;margin-top:24px;background:linear-gradient(135deg,#C9A0B0,#7C4D6B);color:#fff;padding:14px 32px;border-radius:12px;text-decoration:none;font-weight:bold}</style></head>
+      <body><div><div style="font-size:48px">✅</div><h1>E-mail confirmado!</h1><p>Olá, ${name}! Sua conta está ativa.</p><a class="btn" href="${frontendUrl}/login">Abrir o app</a></div></body></html>`)
+  } catch (err) {
+    console.error(err)
+    res.status(500).send('Erro ao confirmar e-mail.')
+  }
+}
+
+export const deleteAccount = async (req: any, res: Response) => {
+  const userId = req.userId
+  try {
+    const coupleRow = await pool.query(
+      'SELECT * FROM couples WHERE user1_id = $1 OR user2_id = $1 LIMIT 1',
+      [userId]
+    )
+    const couple = coupleRow.rows[0]
+    if (couple) {
+      if (couple.user1_id === userId) {
+        await pool.query('DELETE FROM couples WHERE id = $1', [couple.id])
+      } else {
+        await pool.query('UPDATE couples SET user2_id = NULL WHERE id = $1', [couple.id])
+        await pool.query('UPDATE moments SET created_by = NULL WHERE created_by = $1', [userId])
+      }
+    }
+    await pool.query('DELETE FROM users WHERE id = $1', [userId])
+    res.json({ success: true })
+  } catch (err) {
+    console.error(err)
+    res.status(500).json({ error: 'Erro ao cancelar conta.' })
   }
 }

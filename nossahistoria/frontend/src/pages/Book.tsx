@@ -120,11 +120,16 @@ export default function Book() {
 
   const canWrite = (d: any) => {
     if (d.key === 'wedding') return daysUntil(d.date) > 0
+    if (daysUntil(d.date) <= 0) return false
     const prevPassed = d.prevDate ? daysUntil(d.prevDate) <= 0 : true
-    const sixMonthsBefore = new Date(d.date)
-    sixMonthsBefore.setMonth(sixMonthsBefore.getMonth() - 6)
-    const stillOpen = daysUntil(sixMonthsBefore) > 0
-    return prevPassed && stillOpen && daysUntil(d.date) > 0
+    if (!prevPassed) return false
+    const hasEarlierFuture = dates.some(x =>
+      x.key !== 'wedding' &&
+      x.key !== d.key &&
+      daysUntil(x.date) > 0 &&
+      x.date.getTime() < d.date.getTime()
+    )
+    return !hasEarlierFuture
   }
 
   const isOpen = (d: any) => daysUntil(d.date) <= 0
@@ -150,15 +155,14 @@ export default function Book() {
       })?.shortLabel || 'evento anterior'
       return `🔒 Libera depois do ${prevLabel}`
     }
-    return `🔒 Libera 6 meses antes`
+    return `🔒 Aguardando data`
   }
 
   const freeItems = dates.filter(d => !d.premium)
   const premiumItems = dates.filter(d => d.premium)
   const weddingPassed = wedding ? daysUntil(wedding) <= 0 : false
 
-  // Cartas disponíveis para leitura (cápsulas abertas com carta escrita)
-  const availableLetters = dates.filter(d => isOpen(d) && myLetter(d.key))
+  const availableLetters = dates.filter(d => isOpen(d))
   const writableLetters = dates.filter(d => canWrite(d))
 
   // ─── SEÇÃO CARTAS ──────────────────────────────────────────────────────────
